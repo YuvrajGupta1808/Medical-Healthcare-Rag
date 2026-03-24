@@ -1,0 +1,13 @@
+Diabetes Mellitus: Clinical Overview
+
+Type 1 diabetes is an autoimmune condition in which the pancreas produces little or no insulin. The immune system attacks and destroys insulin-producing beta cells in the islets of Langerhans. Patients require lifelong insulin therapy to manage blood glucose levels.
+
+Type 2 diabetes is the most common form, accounting for approximately 90 to 95 percent of all diabetes cases. It is characterised by insulin resistance and relative insulin deficiency. Risk factors include obesity, physical inactivity, and family history. Management typically involves lifestyle modification, oral agents such as metformin, and in advanced cases insulin therapy.
+
+Diagnostic criteria include a fasting plasma glucose of 126 mg/dL or higher on two separate occasions, or a two-hour plasma glucose of 200 mg/dL or higher during an oral glucose tolerance test, or an HbA1c of 6.5 percent or higher.
+
+Symptoms of diabetes include polyuria, polydipsia, unexplained weight loss, fatigue, blurred vision, and slow-healing wounds.
+
+Complications of poorly controlled diabetes include nephropathy, retinopathy, peripheral neuropathy, and increased cardiovascular disease risk. Regular monitoring of HbA1c, which reflects average blood glucose over two to three months, is essential for long-term management.
+
+Hypoglycaemia, defined as a blood glucose below 70 mg/dL, is the most common acute complication of diabetes treatment. Symptoms include tremor, sweating, tachycardia, and confusion. Treatment involves immediate carbohydrate intake.

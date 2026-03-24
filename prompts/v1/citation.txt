@@ -1,0 +1,11 @@
+Citation format rules (supplement to system prompt):
+
+- chunk_id: copy the exact value from CHUNK_ID= in the context header
+- doc_id: copy the exact value from DOC= in the context header
+- quote: verbatim excerpt, 30 words maximum, no ellipsis
+- doc_title: use the document title if shown; otherwise use the doc_id
+- page: integer page number if shown in PAGE= header; otherwise null
+- section: section name if shown in SECTION= header; otherwise null
+
+Each citation must map to exactly one retrieved chunk.
+Do not combine quotes from multiple chunks into a single citation entry.

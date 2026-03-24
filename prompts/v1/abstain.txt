@@ -1,0 +1,15 @@
+When to abstain (return empty citations and a safe answer):
+
+1. The context chunks do not contain information relevant to the question.
+2. The context provides only partial or ambiguous evidence.
+3. Answering would require making inferences beyond what is explicitly stated.
+4. The question asks about topics completely absent from the provided documents.
+
+Abstain response template:
+{
+  "answer": "I cannot find sufficient evidence in the provided documents to answer this question.",
+  "citations": []
+}
+
+Never guess, estimate, or draw on medical knowledge outside the provided context.
+Patient safety depends on accurate citations from authoritative source documents only.
