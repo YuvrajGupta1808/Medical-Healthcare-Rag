@@ -17,6 +17,30 @@ services:
     depends_on:
       weaviate:
         condition: service_healthy
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://localhost:8000/health', timeout=3)",
+        ]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    restart: unless-stopped
+
+  streamlit:
+    build:
+      context: .
+      dockerfile: Dockerfile.streamlit
+    ports:
+      - "8501:8501"
+    environment:
+      STREAMLIT_API_BASE_URL: http://backend:8000
+    depends_on:
+      backend:
+        condition: service_healthy
     restart: unless-stopped
 
   weaviate:

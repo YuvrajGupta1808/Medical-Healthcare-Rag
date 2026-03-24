@@ -7,6 +7,7 @@ Pages: Home · Ingest Documents · Ask Questions · System Health
 from __future__ import annotations
 
 import json
+import os
 from typing import Optional
 
 import httpx
@@ -101,7 +102,7 @@ st.markdown(
 # ============================================================
 # Constants
 # ============================================================
-DEFAULT_API_URL = "http://localhost:8000"
+DEFAULT_API_URL = os.getenv("STREAMLIT_API_BASE_URL", "http://localhost:8000")
 
 MODALITY_META: dict[str, dict] = {
     "text":  {"icon": "💬", "label": "Text",  "desc": "Plain-text question — no file needed",      "types": None},
