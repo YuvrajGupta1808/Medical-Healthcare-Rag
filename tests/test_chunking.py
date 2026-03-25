@@ -47,11 +47,13 @@ def test_chunk_id_length():
 
 def test_single_short_page_produces_one_chunk():
     """A page with fewer tokens than chunk_size (but >= MIN_CHUNK_TOKENS) yields exactly one chunk."""
-    # 60+ tokens: well above MIN_CHUNK_TOKENS=50 and far below chunk_size=600
-    short_text = ("The patient presented with elevated blood pressure readings across "
-                  "three consecutive visits. Lifestyle modifications including dietary "
-                  "changes and increased physical activity were recommended before "
-                  "initiating pharmacological therapy.")
+    # cl100k_base counts fewer tokens than naive word-count; repeat clauses until >= MIN_CHUNK_TOKENS
+    para = (
+        "The patient presented with elevated blood pressure readings across three consecutive visits. "
+        "Lifestyle modifications including dietary changes and increased physical activity were "
+        "recommended before initiating pharmacological treatment when targets were not met."
+    )
+    short_text = " ".join([para, para])
     assert _token_count(short_text) >= 50, "Test text must meet MIN_CHUNK_TOKENS"
     page = _make_page(short_text)
     chunks = chunk_pages([page], chunk_size=DEFAULT_CHUNK_SIZE, overlap=DEFAULT_OVERLAP)

@@ -2,13 +2,12 @@
 Medical Healthcare RAG — Streamlit Frontend
 ============================================
 A full-featured UI for the Medical Healthcare RAG FastAPI backend.
-Pages: Home · Ingest Documents · Ask Questions · System Health
+Pages: Home · Full flow test · Ingest · Ask · System Health
 """
 from __future__ import annotations
 
-import json
 import os
-from typing import Optional
+from pathlib import Path
 
 import httpx
 import streamlit as st
@@ -112,6 +111,68 @@ MODALITY_META: dict[str, dict] = {
     "video": {"icon": "🎬", "label": "Video", "desc": "Upload video — description drives retrieval","types": ["mp4", "avi", "mov", "webm", "mkv"]},
 }
 
+# Full-flow playbook: use after ingesting `sample_medical.txt` (or similar diabetes overview).
+FLOW_E2E_QUESTIONS: list[dict[str, str]] = [
+    {
+        "id": "A1",
+        "goal": "Broad grounded summary",
+        "question": "What is type 2 diabetes and what are common risk factors?",
+        "good_signs": "Mentions insulin resistance, obesity/inactivity/family history; cites retrieved chunks.",
+    },
+    {
+        "id": "A2",
+        "goal": "Numeric / diagnostic criteria",
+        "question": "What fasting glucose and HbA1c thresholds are used as diagnostic criteria in the document?",
+        "good_signs": "126 mg/dL fasting (two occasions), HbA1c ≥ 6.5%; quotes should match the corpus.",
+    },
+    {
+        "id": "A3",
+        "goal": "Treatment / medication",
+        "question": "What first-line medication is mentioned for type 2 diabetes management?",
+        "good_signs": "Metformin + lifestyle; evidence tied to the doc.",
+    },
+    {
+        "id": "A4",
+        "goal": "Complications",
+        "question": "List complications of poorly controlled diabetes mentioned in the text.",
+        "good_signs": "Nephropathy, retinopathy, neuropathy, cardiovascular risk; grounded list.",
+    },
+    {
+        "id": "A5",
+        "goal": "Acute complication",
+        "question": "What is hypoglycaemia, what symptoms are listed, and how is it treated?",
+        "good_signs": "Glucose <70 mg/dL, tremor/sweating/confusion, carbohydrate intake.",
+    },
+    {
+        "id": "B1",
+        "goal": "Lexical / BM25-friendly",
+        "question": "polyuria polydipsia diabetes symptoms",
+        "good_signs": "Hybrid search should surface the symptoms paragraph.",
+    },
+    {
+        "id": "C1",
+        "goal": "Adversarial (out-of-corpus)",
+        "question": "What is the stock price of Apple Inc. next Tuesday?",
+        "good_signs": "Abstain or explicit ‘not in documents’; ideally no fake citations.",
+    },
+]
+
+
+def _sample_medical_fixture_text() -> str:
+    p = Path(__file__).resolve().parent / "tests" / "fixtures" / "sample_medical.txt"
+    if p.is_file():
+        return p.read_text(encoding="utf-8")
+    return (
+        "Diabetes Mellitus: Clinical Overview\n\n"
+        "Type 2 diabetes is the most common form. Management typically involves "
+        "metformin.\n\n"
+        "Diagnostic criteria include fasting plasma glucose of 126 mg/dL or higher, "
+        "or HbA1c of 6.5 percent or higher.\n"
+    )
+
+
+ABSTAIN_SNIPPET = "I cannot find sufficient evidence"
+
 # ============================================================
 # Session-state defaults
 # ============================================================
@@ -178,7 +239,13 @@ with st.sidebar:
 
     page = st.radio(
         "Navigation",
-        ["🏠 Home", "📁 Ingest Documents", "🔍 Ask Questions", "❤️ System Health"],
+        [
+            "🏠 Home",
+            "🧪 Full flow test",
+            "📁 Ingest Documents",
+            "🔍 Ask Questions",
+            "❤️ System Health",
+        ],
         label_visibility="collapsed",
     )
 
@@ -230,33 +297,44 @@ def render_home() -> None:
 
     st.markdown("---")
 
-    # ---- Pipeline architecture ----
-    st.subheader("🏗️ LangGraph Pipeline")
-    s1, s2, s3, s4 = st.columns(4)
-    with s1:
-        st.markdown(
-            """<div class="step"><h5>1 · Input Router</h5>
-            <p>Normalises text / image / audio / PDF / video into a unified RAGState</p></div>""",
-            unsafe_allow_html=True,
-        )
-    with s2:
-        st.markdown(
-            """<div class="step"><h5>2 · Dense Retrieve</h5>
-            <p>Gemini embeddings → Weaviate cosine similarity search (top-k chunks)</p></div>""",
-            unsafe_allow_html=True,
-        )
-    with s3:
-        st.markdown(
-            """<div class="step"><h5>3 · Generate</h5>
-            <p>Llama 3.1 70B produces a JSON answer with validated source citations</p></div>""",
-            unsafe_allow_html=True,
-        )
-    with s4:
-        st.markdown(
-            """<div class="step"><h5>4 · Output Route</h5>
-            <p>Routes text / image / PDF responses based on retrieved modality signals</p></div>""",
-            unsafe_allow_html=True,
-        )
+    # ---- Pipeline architecture (matches LangGraph in src/pipeline/graph.py) ----
+    st.subheader("🏗️ LangGraph pipeline (backend)")
+    st.caption("Full path: input_router → retrieve (hybrid) → rerank → generate → citation_gate → output_route")
+    r1 = st.columns(3)
+    r2 = st.columns(3)
+    steps = [
+        (
+            "1 · Input router",
+            "Builds RAGState: query text, optional doc_id filter, modality metadata.",
+        ),
+        (
+            "2 · Hybrid retrieve",
+            "Gemini query embedding → Weaviate hybrid (BM25 + vector), top-M chunks "
+            "(see HYBRID_ALPHA).",
+        ),
+        (
+            "3 · Rerank",
+            "Cohere rerank if COHERE_API_KEY is set; else top-K by retrieval score.",
+        ),
+        (
+            "4 · Generate",
+            "Fireworks LLM: answer + citation objects from retrieved context.",
+        ),
+        (
+            "5 · Citation gate",
+            "Abstains if there are no valid citations (trust / safety).",
+        ),
+        (
+            "6 · Output route",
+            "Fills image_url / pdf_url when top chunk modality + storage_ref warrant it.",
+        ),
+    ]
+    for col, (title, blurb) in zip(r1 + r2, steps, strict=True):
+        with col:
+            st.markdown(
+                f"""<div class="step"><h5>{title}</h5><p>{blurb}</p></div>""",
+                unsafe_allow_html=True,
+            )
 
     st.markdown("---")
 
@@ -291,11 +369,10 @@ def render_home() -> None:
     with st.expander("🚀 Quick-start Guide"):
         st.markdown(
             """
-1. **Copy environment variables**: `cp .env.example .env` and fill in your API keys.
-2. **Start Weaviate**: `docker compose -f docker-compose.dev.yml up -d`
-3. **Start FastAPI**: `uvicorn src.api.app:app --reload`
-4. **Ingest a document**: Go to **📁 Ingest Documents**, upload a PDF/TXT/MD file.
-5. **Ask a question**: Go to **🔍 Ask Questions**, select a modality, and submit.
+1. **Environment**: `cp .env.example .env` — set `FIREWORKS_API_KEY`, `GEMINI_API_KEY`, and a Fireworks model your account allows.
+2. **Stack**: `docker compose -f docker-compose.dev.yml up -d --build` — Weaviate, backend, Streamlit (optional MinIO, Next UI on port 3000).
+3. **Guided test**: **🧪 Full flow test** — sample document, ingest steps, and example questions with what “good” looks like.
+4. **Ad hoc**: **📁 Ingest Documents** → **🔍 Ask Questions** (text-only for `/query` today).
 """
         )
 
@@ -480,19 +557,73 @@ def render_ingest(api_url: str) -> None:
 # ============================================================
 # PAGE — Ask Questions
 # ============================================================
-def _render_query_result(result: dict) -> None:
-    """Render a /query API response with answer, citations, and metadata."""
-    st.divider()
-    st.subheader("📊 Query Result")
+def _render_pipeline_trace(result: dict) -> None:
+    """
+    Backend does not return per-node telemetry; infer a teaching trace from QueryResponse.
+    """
+    answer = (result.get("answer") or "").strip()
+    citations = result.get("citations") or []
+    n_cit = len(citations)
+    abstain = ABSTAIN_SNIPPET in answer
+    image_url = result.get("image_url")
+    pdf_url = result.get("pdf_url")
+    q_echo = (result.get("query") or "").strip()
 
-    # ---- Answer ----
-    answer: Optional[str] = result.get("answer")
+    def line(icon: str, title: str, detail: str) -> None:
+        st.markdown(f"{icon} **{title}** — {detail}")
+
+    with st.expander("🧭 Pipeline trace (inferred from response)", expanded=True):
+        line("✅", "1 · Input router", "Query accepted and built initial LangGraph state.")
+        if q_echo:
+            st.caption(f"Echo: `{q_echo[:120]}{'…' if len(q_echo) > 120 else ''}`")
+        if n_cit > 0 or (answer and not abstain):
+            line(
+                "✅",
+                "2 · Hybrid retrieve",
+                f"Retrieval likely returned useful context ({n_cit} citation(s) in response).",
+            )
+        elif abstain:
+            line(
+                "⚠️",
+                "2 · Hybrid retrieve",
+                "Either no/few chunks matched, or later stages dropped citations — check ingest & doc filter.",
+            )
+        else:
+            line("❓", "2 · Hybrid retrieve", "Unclear from response alone.")
+        line(
+            "ℹ️",
+            "3 · Rerank",
+            "Fireworks Qwen3-8B Serverless Rerank applied. (Scores are calculated internally ahead of LLM generation).",
+        )
+        if answer:
+            line("✅", "4 · Generate", f"Answer length {len(answer)} chars.")
+        else:
+            line("❌", "4 · Generate", "No answer field.")
+        if abstain:
+            line("⚠️", "5 · Citation gate", "Abstain path — no surviving citations to ground the answer.")
+        elif n_cit > 0:
+            line("✅", "5 · Citation gate", f"{n_cit} citation(s) passed the gate.")
+        else:
+            line("⚠️", "5 · Citation gate", "Answer present but no structured citations in payload.")
+        if image_url or (pdf_url and pdf_url != "EXPORT_PENDING"):
+            line("✅", "6 · Output route", f"Media hints set (image={bool(image_url)}, pdf={bool(pdf_url)}).")
+        else:
+            line("✅", "6 · Output route", "Text-first response (no image / pending PDF export).")
+
+
+def _render_query_result(result: dict) -> None:
+    """Render POST /query JSON (QueryResponse shape)."""
+    st.divider()
+    st.subheader("📊 Query result")
+
+    _render_pipeline_trace(result)
+
+    answer: str | None = result.get("answer")
     if answer:
-        abstain_phrase = "I cannot find sufficient evidence"
-        if abstain_phrase in answer:
+        if ABSTAIN_SNIPPET in answer:
             st.markdown(
                 f"""<div class="abstain-box">
-                    ⚠️ <strong>Abstain</strong><br>{answer}
+                    ⚠️ <strong>Citation gate / abstain</strong><br>{answer}
                 </div>""",
                 unsafe_allow_html=True,
             )
@@ -505,48 +636,48 @@ def _render_query_result(result: dict) -> None:
                 unsafe_allow_html=True,
             )
     else:
-        st.info(
-            "ℹ️ The `/query` endpoint returned a normalised query state. "
-            "Once the full retrieval → generation pipeline is connected, "
-            "the answer and citations will appear here."
-        )
+        st.info("No `answer` in JSON — check backend logs and pipeline errors.")
 
-    # ---- Normalised query text ----
-    query_text = result.get("query_text", "")
-    original = result.get("original_question", "")
-    if query_text and query_text != original:
-        with st.expander("🔎 Enriched query text sent to retrieval"):
-            st.code(query_text, language=None)
+    citations_raw = result.get("citations") or []
+    if citations_raw:
+        st.markdown(f"#### 📎 Citations ({len(citations_raw)})")
+        for cit in citations_raw:
+            if isinstance(cit, dict):
+                cid = cit.get("chunk_id", "")
+                title = cit.get("doc_title", "")
+                quote = cit.get("quote", "")
+                page = cit.get("page")
+                section = cit.get("section")
+                meta_bits = []
+                if page is not None:
+                    meta_bits.append(f"p.{page}")
+                if section:
+                    meta_bits.append(str(section))
+                meta_str = " · ".join(meta_bits) if meta_bits else ""
+                st.markdown(
+                    f'<div class="citation-card"><strong>{title}</strong>'
+                    f' <code>{cid}</code><br><em>{quote[:400]}{"…" if len(str(quote)) > 400 else ""}</em>'
+                    f"{'<br><small>' + meta_str + '</small>' if meta_str else ''}</div>",
+                    unsafe_allow_html=True,
+                )
+                cit_img_url = cit.get("image_url")
+                if cit_img_url:
+                    st.image(cit_img_url, use_container_width=True, caption=f"Image referenced in {title}")
 
-    # ---- Citations ----
-    cited_ids: list[str] = result.get("cited_chunk_ids", [])
-    if cited_ids:
-        st.markdown(f"#### 📎 Cited Chunks ({len(cited_ids)})")
-        for cid in cited_ids:
-            st.markdown(
-                f'<div class="citation-card">Chunk ID: <code>{cid}</code></div>',
-                unsafe_allow_html=True,
-            )
-
-    # ---- Image URL (output router) ----
     image_url = result.get("image_url")
     if image_url:
-        st.markdown("#### 🖼️ Retrieved Image")
+        st.markdown("#### 🖼️ Image URL (output router)")
         st.image(image_url, caption=image_url)
 
-    # ---- Modality metadata ----
-    meta: dict = result.get("modality_metadata", {})
-    if meta:
-        with st.expander("📂 Modality Metadata"):
-            for k, v in meta.items():
-                st.markdown(f"- **{k}**: `{v}`")
+    pdf_url = result.get("pdf_url")
+    if pdf_url:
+        st.markdown(f"#### 📄 PDF hint: `{pdf_url}`")
 
-    # ---- Storage ref ----
-    storage_ref = result.get("storage_ref")
-    if storage_ref:
-        st.markdown(f"**📦 Storage ref:** `{storage_ref}`")
+    low = result.get("low_confidence")
+    conf = result.get("confidence_score")
+    if low is not None or conf is not None:
+        st.caption(f"confidence_score={conf!r}, low_confidence={low!r}")
 
-    # ---- Raw JSON ----
     with st.expander("📋 Raw JSON response"):
         st.json(result)
 
@@ -555,7 +686,7 @@ def render_query(api_url: str) -> None:
     st.title("🔍 Ask Questions")
     st.markdown(
         "Submit queries against your ingested medical documents. "
-        "Current backend route accepts text JSON queries."
+        "The backend route supports both text and multimodal uploads."
     )
     st.divider()
 
@@ -575,14 +706,16 @@ def render_query(api_url: str) -> None:
         modality = mod_keys[mod_idx]
         st.caption(MODALITY_META[modality]["desc"])
 
+        label = "Your Question" if modality == "text" else "Your Question (Optional)"
         question = st.text_area(
-            "Your Question",
+            label,
             placeholder=(
                 "e.g. What are the contraindications of metformin in patients "
                 "with renal impairment?"
             ),
             height=130,
         )
+
 
     with col_right:
         st.markdown("#### Query Options")
@@ -597,11 +730,11 @@ def render_query(api_url: str) -> None:
             help="How many chunks to retrieve before generation",
         )
 
-        # File upload — only for non-text modalities
-        uploaded_file = None
+        # File upload — now fully supported via multimodal endpoint file uploader
+        uploaded_query_file = None
         if modality != "text":
             file_types = MODALITY_META[modality]["types"]
-            uploaded_file = st.file_uploader(
+            uploaded_query_file = st.file_uploader(
                 f"{MODALITY_META[modality]['icon']} Upload {modality} file",
                 type=file_types,
                 help=f"Required for the '{modality}' modality.",
@@ -611,32 +744,49 @@ def render_query(api_url: str) -> None:
 
     # Validation
     has_question = bool(question.strip())
-    can_submit = has_question and modality == "text"
+    
+    if modality == "text":
+        can_submit = has_question
+    else:
+        can_submit = uploaded_query_file is not None
 
-    if not has_question and question:
-        st.warning("Question cannot be empty.")
-    if modality != "text":
-        st.warning(
-            "Current `/query` backend endpoint is text-only. "
-            "Select Text modality to submit."
-        )
+    if modality == "text" and not has_question and question:
+        st.warning("Text queries cannot be empty.")
+    elif modality != "text" and uploaded_query_file is None:
+        st.warning(f"Please upload an {modality} file.")
 
     submit = st.button("🔍 Submit Query", type="primary", disabled=not can_submit)
 
     if submit:
         with st.spinner("Processing your query…"):
             try:
-                payload = {
-                    "query": question.strip(),
-                    "doc_id": doc_filter.strip() or None,
-                    "top_k": int(top_k),
-                }
-
                 with httpx.Client(timeout=90.0) as client:
-                    resp = client.post(
-                        f"{api_url}/query",
-                        json=payload,
-                    )
+                    if modality == "text":
+                        payload = {
+                            "query": question.strip(),
+                            "doc_id": doc_filter.strip() or None,
+                            "top_k": int(top_k),
+                        }
+                        resp = client.post(
+                            f"{api_url}/query",
+                            json=payload,
+                        )
+                    else:
+                        assert uploaded_query_file is not None
+                        # Multimodal endpoint supports multipart
+                        form_data = {
+                            "query": question.strip(),
+                            "modality": modality,
+                            "doc_id": doc_filter.strip() or None,
+                            "top_k": int(top_k),
+                        }
+                        f_mime = uploaded_query_file.type or "application/octet-stream"
+                        files = {"file": (uploaded_query_file.name, uploaded_query_file.getvalue(), f_mime)}
+                        resp = client.post(
+                            f"{api_url}/query/multimodal",
+                            data=form_data,
+                            files=files,
+                        )
 
                 if resp.status_code == 200:
                     result = resp.json()
@@ -685,16 +835,113 @@ def render_query(api_url: str) -> None:
     with st.expander("ℹ️ How querying works"):
         st.markdown(
             """
-1. **Input Router** — Normalises your question (+ optional file) into a unified `RAGState`.
-   - *Text*: question passed directly as retrieval query.
-   - *Image / Video*: file is described (Gemini vision stub → Vertex AI in production) and merged with the question.
-   - *Audio*: transcribed (Whisper stub → Vertex AI in production); transcript drives retrieval.
-   - *PDF*: file stored by reference; question drives retrieval.
-2. **Dense Retrieve** — Query text is embedded with `gemini-embedding-exp-03-07` and a Weaviate `near_vector` search returns top-k chunks.
-3. **Generate** — Llama 3.1 70B receives chunks as numbered context and returns a JSON object with `answer` + `citations`.
-4. **Output Route** — Determines whether to include an image URL in the response.
+1. **Input router** — Builds `RAGState` from your text question, optional `doc_id`, `top_k`.
+2. **Hybrid retrieve** — Gemini embedding + Weaviate hybrid (BM25 + vector).
+3. **Rerank** — Cohere if configured; else score-order truncation to top-K.
+4. **Generate** — Fireworks LLM produces `answer` + structured `citations`.
+5. **Citation gate** — Replaces answer with abstain text if there are no citations.
+6. **Output route** — May set `image_url` / `pdf_url` from top retrieved chunk.
 """
         )
+
+
+# ============================================================
+# PAGE — Full flow test (playbook)
+# ============================================================
+def render_full_flow_test(api_url: str) -> None:
+    """Guided E2E: stack → ingest → query, aligned with LangGraph steps."""
+    st.title("🧪 Full flow test")
+    st.markdown(
+        "Walk through the same path the **backend** runs: ingest into Weaviate, then "
+        "`/query` through **input_router → hybrid retrieve → rerank → generate → "
+        "citation_gate → output_route**."
+    )
+    st.divider()
+
+    st.subheader("① Check the stack")
+    health_data = fetch_health(api_url)
+    if health_data:
+        st.success(f"API `{api_url}` reachable — Weaviate: **{health_data.get('weaviate', '?')}**")
+    else:
+        st.error(f"API not reachable at `{api_url}`. Start compose or fix **API Base URL** in the sidebar.")
+
+    c1, c2, c3 = st.columns(3)
+    with c1:
+        st.metric("Backend", "http://localhost:8000" if "localhost" in api_url or "127.0.0.1" in api_url else "see compose")
+    with c2:
+        st.metric("Weaviate REST", "http://localhost:8080")
+    with c3:
+        st.metric("Streamlit", "http://localhost:8501")
+
+    st.caption(
+        "Compose profile also starts MinIO (9000/9001) and optional Next UI (3000) when defined in "
+        "`docker-compose.dev.yml`."
+    )
+
+    st.divider()
+    st.subheader("② Seed corpus")
+    sample_text = _sample_medical_fixture_text()
+    st.download_button(
+        label="⬇️ Download sample_medical.txt",
+        data=sample_text.encode("utf-8"),
+        file_name="sample_medical.txt",
+        mime="text/plain",
+        help="Upload this file on **📁 Ingest Documents** to create predictable Q&A.",
+    )
+    with st.expander("Preview sample document (first ~800 chars)"):
+        st.code(sample_text[:800] + ("…" if len(sample_text) > 800 else ""), language=None)
+
+    st.divider()
+    st.subheader("③ Ingest")
+    st.markdown(
+        "1. Open **📁 Ingest Documents** in the sidebar.\n"
+        "2. Upload `sample_medical.txt` (leave **Document ID** empty for a new UUID).\n"
+        "3. Note **doc_id** and **chunk_count** — expect **multiple chunks** for this file.\n"
+        "4. (Optional) Paste **Document ID** into **Filter by Document ID** when querying "
+        "to restrict retrieval to this doc only."
+    )
+
+    st.divider()
+    st.subheader("④ Ask — example questions & what “good” looks like")
+    st.markdown(
+        "Use **🔍 Ask Questions** with **Text** modality. After running, expand **Pipeline trace** "
+        "on the result."
+    )
+    playbook_rows = [
+        {
+            "ID": row["id"],
+            "Goal": row["goal"],
+            "Question (copy into Ask page)": row["question"],
+            "Good signs": row["good_signs"],
+        }
+        for row in FLOW_E2E_QUESTIONS
+    ]
+    st.dataframe(
+        playbook_rows,
+        use_container_width=True,
+        hide_index=True,
+    )
+
+    st.divider()
+    st.subheader("⑤ Interpret results")
+    st.markdown(
+        """
+| Observation | Likely meaning |
+|-------------|----------------|
+| Answer + several citations | Retrieve + generate + citation gate happy path |
+| Abstain message | No citations survived (empty retrieval, model omitted cites, or gate) |
+| Citations with short quotes | Check quotes appear in your uploaded file |
+| `image_url` / `pdf_url` | Output router; usually needs image/PDF chunks with `storage_ref` |
+| Timeouts | Large ingest or slow LLM — increase patience or reduce corpus size |
+
+**Ideas to try next:** re-ingest after editing the file (same `doc_id` replaces chunks); lower **Top-K**
+to stress precision; ask **C1** after *only* ingesting medical text to see abstain behavior.
+"""
+    )
+
+    st.divider()
+    st.subheader("⑥ Automated tests (no UI)")
+    st.code("uv run pytest tests/ -q", language="bash")
 
 
 # ============================================================
@@ -804,6 +1051,8 @@ RETRIEVAL_TOP_K=5
 # ============================================================
 if page == "🏠 Home":
     render_home()
+elif page == "🧪 Full flow test":
+    render_full_flow_test(api_url)
 elif page == "📁 Ingest Documents":
     render_ingest(api_url)
 elif page == "🔍 Ask Questions":

@@ -26,7 +26,13 @@ def _build_context(chunks: list) -> str:
         if chunk.get("section"):
             meta_parts.append(f"SECTION={chunk['section']}")
         header = f"[{i}] " + " | ".join(meta_parts)
-        parts.append(f"{header}\n{chunk['text']}")
+        
+        chunk_text = chunk.get("text") or ""
+        if chunk.get("modality_type") == "image":
+            caption = chunk.get("caption") or f"Image on page {chunk.get('page', '?')}"
+            chunk_text = f"[IMAGE SNIPPET: {caption}] - Please cite this chunk ID if the visual graph/chart is relevant to the user query."
+            
+        parts.append(f"{header}\n{chunk_text}")
     return "\n\n---\n\n".join(parts)
 
 
@@ -87,12 +93,14 @@ async def generate_node(state: RAGState) -> dict:
     raw_citations: list[dict] = parsed.get("citations", [])
 
     # Citation gate: only keep citations whose chunk_id was actually retrieved
-    valid_ids = {chunk["chunk_id"] for chunk in state["retrieved_chunks"]}
+    chunks_map = {chunk["chunk_id"]: chunk for chunk in state["retrieved_chunks"]}
     citations: list[Citation] = []
     dropped = 0
+    
     for cit in raw_citations:
         cid = cit.get("chunk_id", "")
-        if cid in valid_ids:
+        if cid in chunks_map:
+            c_meta = chunks_map[cid]
             citations.append(
                 Citation(
                     chunk_id=cid,
@@ -101,6 +109,8 @@ async def generate_node(state: RAGState) -> dict:
                     doc_title=str(cit.get("doc_title", "")),
                     page=cit.get("page"),
                     section=cit.get("section"),
+                    storage_ref=c_meta.get("storage_ref"),
+                    modality_type=c_meta.get("modality_type"),
                 )
             )
         else:

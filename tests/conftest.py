@@ -13,6 +13,7 @@ import os
 # Set BEFORE any app imports so get_settings() caches with testing=True.
 # os.environ takes precedence over .env file in pydantic-settings.
 os.environ["TESTING"] = "true"
+os.environ["CONFIDENCE_THRESHOLD"] = "0.5"
 os.environ.setdefault("FIREWORKS_API_KEY", "test_key_placeholder")
 os.environ.setdefault("GEMINI_API_KEY", "test_gemini_key_placeholder")
 

@@ -15,6 +15,8 @@ class RawPage:
     section: str = ""
     doc_id: str = ""
     doc_title: str = ""
+    modality_type: str = "text"
+    image_bytes: bytes | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -41,6 +43,26 @@ def load_pdf(
         for page_idx in range(len(doc)):
             page = doc[page_idx]
             text = page.get_text("text")
+
+            # 1. Extract Full Page Layout (Catches Vector graphics and tables perfectly)
+            try:
+                # 150 DPI is a good balance of OCR readability and small chunk size
+                pix = page.get_pixmap(dpi=150)
+                pages.append(
+                    RawPage(
+                        text="",
+                        page_number=page_idx + 1,
+                        section=current_section,
+                        doc_id=doc_id,
+                        doc_title=doc_title or path.stem,
+                        modality_type="image",
+                        image_bytes=pix.tobytes("png"),
+                    )
+                )
+            except Exception as e:
+                logger.warning("Failed capturing page layout frame page %d: %s", page_idx+1, e)
+
+            # 2. Extract Text
             if not text.strip():
                 continue
 
@@ -59,6 +81,7 @@ def load_pdf(
                     section=current_section,
                     doc_id=doc_id,
                     doc_title=doc_title or path.stem,
+                    modality_type="text",
                 )
             )
     finally:
@@ -93,6 +116,32 @@ def load_text(
 
 
 # ---------------------------------------------------------------------------
+# Image loader
+# ---------------------------------------------------------------------------
+
+def load_image(
+    path: str | Path,
+    doc_id: str,
+    doc_title: str = "",
+) -> list[RawPage]:
+    """Load a standalone image as a single RawPage."""
+    path = Path(path)
+    image_bytes = path.read_bytes()
+    logger.info("Loaded image file '%s' (doc_id=%s, bytes=%d)", path.name, doc_id, len(image_bytes))
+    return [
+        RawPage(
+            text="",
+            page_number=1,
+            section="",
+            doc_id=doc_id,
+            doc_title=doc_title or path.stem,
+            modality_type="image",
+            image_bytes=image_bytes,
+        )
+    ]
+
+
+# ---------------------------------------------------------------------------
 # Dispatcher
 # ---------------------------------------------------------------------------
 
@@ -110,8 +159,10 @@ def load_document(
             return load_pdf(path, doc_id=doc_id, doc_title=doc_title)
         case ".txt" | ".md":
             return load_text(path, doc_id=doc_id, doc_title=doc_title)
+        case ".png" | ".jpg" | ".jpeg":
+            return load_image(path, doc_id=doc_id, doc_title=doc_title)
         case _:
             raise ValueError(
                 f"Unsupported document type: '{suffix}'. "
-                "Supported: .pdf, .txt, .md"
+                "Supported: .pdf, .txt, .md, .png, .jpg, .jpeg"
             )

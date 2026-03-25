@@ -19,6 +19,7 @@ dependencies = [
     "openai>=1.50.0",
     # Document loading
     "pymupdf>=1.24.0",
+    "boto3>=1.34.0",
     # Tokenisation
     "tiktoken>=0.8.0",
     # Validation / config
@@ -31,6 +32,9 @@ dependencies = [
     "structlog>=24.4.0",
     # Retry
     "tenacity>=9.0.0",
+    # Reranking
+    "cohere>=5.0.0",
+    "boto3>=1.34.0",
 ]
 
 [dependency-groups]

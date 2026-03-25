@@ -46,3 +46,27 @@ dist/
 
 # Docker / local data
 docker-data/
+data/
+weaviate_data/
+minio_data/
+
+# Javascript / Next.js
+node_modules/
+.next/
+out/
+.npm_cache/
+.pnpm-store/
+tmp_uv_cache/
+tmp_venv*/
+
+# Sample data in root (moved to tests/assets)
+!tests/assets/test.pdf
+!tests/assets/test.txt
+!tests/assets/test.wav
+*.pdf
+*.wav
+*.mp3
+*.png
+*.jpg
+*.jpeg
+!tests/assets/*

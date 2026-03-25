@@ -17,14 +17,19 @@ from src.utils.config import get_settings
 
 logger = logging.getLogger(__name__)
 
-COLLECTION_NAME = "MedicalChunk"
+def _get_collection_name() -> str:
+    """Read collection name from environment settings."""
+    return get_settings().weaviate_collection
 
-# ---------------------------------------------------------------------------
-# Schema contract — single source of truth for Step 3 drift detection
-# ---------------------------------------------------------------------------
+def __getattr__(name: str):
+    if name == "COLLECTION_NAME":
+        return _get_collection_name()
+    raise AttributeError(f"module {__name__} has no attribute {name}")
+    
 EXPECTED_PROPERTIES: dict[str, DataType] = {
     "chunk_id":      DataType.TEXT,
     "doc_id":        DataType.TEXT,
+    "patient_id":    DataType.TEXT,
     "doc_title":     DataType.TEXT,
     "text":          DataType.TEXT,
     "modality_type": DataType.TEXT,
@@ -111,11 +116,13 @@ def ensure_schema() -> None:
     """
     client = get_client()
 
-    if client.collections.exists(COLLECTION_NAME):
-        logger.info("Collection '%s' already exists — validating schema", COLLECTION_NAME)
+    coll_name = _get_collection_name()
+
+    if client.collections.exists(coll_name):
+        logger.info("Collection '%s' already exists — validating schema", coll_name)
     else:
         client.collections.create(
-            name=COLLECTION_NAME,
+            name=coll_name,
             vectorizer_config=Configure.Vectorizer.none(),
             vector_index_config=Configure.VectorIndex.hnsw(
                 distance_metric=VectorDistances.COSINE,
@@ -124,6 +131,7 @@ def ensure_schema() -> None:
                 # Exact-match / filter fields
                 Property(name="chunk_id",     data_type=DataType.TEXT, tokenization=Tokenization.FIELD),
                 Property(name="doc_id",        data_type=DataType.TEXT, tokenization=Tokenization.FIELD),
+                Property(name="patient_id",    data_type=DataType.TEXT, tokenization=Tokenization.FIELD),
                 Property(name="attachment_id", data_type=DataType.TEXT, tokenization=Tokenization.FIELD),
                 Property(name="modality_type", data_type=DataType.TEXT, tokenization=Tokenization.FIELD),
                 # BM25-indexed text fields
@@ -142,16 +150,16 @@ def ensure_schema() -> None:
                 ),
             ],
         )
-        logger.info("Collection '%s' created", COLLECTION_NAME)
+        logger.info("Collection '%s' created", coll_name)
 
     missing = validate_schema()
     if missing:
         raise RuntimeError(
-            f"Schema drift on '{COLLECTION_NAME}': missing properties {missing}. "
+            f"Schema drift on '{coll_name}': missing properties {missing}. "
             "Drop and recreate the collection or run a migration."
         )
     logger.info("Schema for '%s' validated — all %d properties present",
-                COLLECTION_NAME, len(EXPECTED_PROPERTIES))
+                coll_name, len(EXPECTED_PROPERTIES))
 
 
 def validate_schema() -> list[str]:
@@ -162,16 +170,17 @@ def validate_schema() -> list[str]:
         List of property names missing from the collection (empty = no drift).
     """
     client = get_client()
-    if not client.collections.exists(COLLECTION_NAME):
+    coll_name = _get_collection_name()
+    if not client.collections.exists(coll_name):
         return list(EXPECTED_PROPERTIES.keys())
 
-    config = client.collections.get(COLLECTION_NAME).config.get()
+    config = client.collections.get(coll_name).config.get()
     existing = {prop.name for prop in config.properties}
     missing = [name for name in EXPECTED_PROPERTIES if name not in existing]
 
     if missing:
         logger.error(
-            "Schema drift! '%s' is missing properties: %s", COLLECTION_NAME, missing
+            "Schema drift! '%s' is missing properties: %s", coll_name, missing
         )
     return missing
 
@@ -186,7 +195,7 @@ def delete_document(doc_id: str) -> int:
     Returns:
         Number of objects successfully deleted.
     """
-    collection = get_client().collections.get(COLLECTION_NAME)
+    collection = get_client().collections.get(_get_collection_name())
     result = collection.data.delete_many(
         where=wvc.query.Filter.by_property("doc_id").equal(doc_id)
     )

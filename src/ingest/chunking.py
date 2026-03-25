@@ -23,12 +23,13 @@ class IngestChunk:
     doc_id: str
     doc_title: str
     text: str
-    modality_type: str  # "text" for all Step-1 chunks
+    modality_type: str  # "text" or "image"
     page: int | None
     section: str
     caption: str
     storage_ref: str | None
     attachment_id: str
+    image_bytes: bytes | None = None
 
 
 def make_chunk_id(doc_id: str, chunk_index: int) -> str:
@@ -68,6 +69,25 @@ def chunk_pages(
     discarded = 0
 
     for page in pages:
+        if page.modality_type == "image" and page.image_bytes:
+            chunks.append(
+                IngestChunk(
+                    chunk_id=make_chunk_id(page.doc_id, chunk_index),
+                    doc_id=page.doc_id,
+                    doc_title=page.doc_title,
+                    text="",
+                    modality_type="image",
+                    page=page.page_number,
+                    section=page.section,
+                    caption=f"Image from {page.doc_title} (Page {page.page_number})",
+                    storage_ref=None,
+                    attachment_id="",
+                    image_bytes=page.image_bytes,
+                )
+            )
+            chunk_index += 1
+            continue
+
         tokens = enc.encode(page.text)
         if not tokens:
             continue
@@ -135,7 +155,7 @@ def validate_chunks(chunks: list[IngestChunk], chunk_size: int = DEFAULT_CHUNK_S
     for i, chunk in enumerate(chunks):
         prefix = f"chunk[{i}] (id={chunk.chunk_id!r})"
 
-        if not chunk.text.strip():
+        if chunk.modality_type != "image" and not chunk.text.strip():
             errors.append(f"{prefix}: empty text")
         if not chunk.doc_id:
             errors.append(f"{prefix}: missing doc_id")

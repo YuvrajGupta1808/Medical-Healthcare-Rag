@@ -4,31 +4,32 @@ import logging
 import tempfile
 import uuid
 from pathlib import Path
+from typing import Optional
 
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 
 from src.ingest.pipeline import ingest_document
 from src.schemas.response import DeleteDocumentResponse, IngestResponse
 from src.services import weaviate_client
+from src.api.routes.patients import link_doc_to_patient, unlink_doc_from_patient
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
 
-_SUPPORTED_TYPES = {".pdf", ".txt", ".md"}
+_SUPPORTED_TYPES = {".pdf", ".txt", ".md", ".png", ".jpg", ".jpeg"}
 
 
 @router.post("", response_model=IngestResponse, status_code=201)
 async def ingest(
-    file: UploadFile = File(..., description="Document to ingest (.pdf, .txt, .md)"),  # noqa: B008
+    file: UploadFile = File(..., description="Document to ingest (.pdf, .txt, .md, .png, .jpg, .jpeg)"),  # noqa: B008
     doc_id: str = Form(default="", description="Stable document ID (auto-generated if empty)"),
     doc_title: str = Form(default="", description="Human-readable document title"),
+    patient_id: Optional[str] = Form(default=None, description="Link this document to a specific patient")
 ) -> IngestResponse:
     """
     Ingest a document into the vector store.
 
-    Supported formats: PDF, plain text (.txt), Markdown (.md).
-    Chunked into 500–800 token windows with 100 token overlap.
-    Each chunk is embedded via Gemini multimodal and stored in Weaviate.
+    Supported formats: PDF, plain text (.txt), Markdown (.md), and images (.png, .jpg, .jpeg).
     """
     filename = file.filename or "document"
     suffix = Path(filename).suffix.lower()
@@ -54,15 +55,24 @@ async def ingest(
             path=tmp_path,
             doc_id=resolved_doc_id,
             doc_title=resolved_title,
+            patient_id=patient_id,
         )
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
-    except Exception as exc:
-        logger.error("Ingest error for doc_id=%s: %s", resolved_doc_id, exc)
-        raise HTTPException(status_code=500, detail="Ingest failed. Check server logs.") from exc
+    except Exception as e:
+        logger.error("Ingest route failed: %s", e)
+        raise HTTPException(
+            status_code=500, detail=f"Ingest failed: {str(e)}"
+        ) from e
     finally:
         if tmp_path and tmp_path.exists():
             tmp_path.unlink(missing_ok=True)
+
+    # Link to patient if provided
+    if patient_id:
+        linked = link_doc_to_patient(patient_id, resolved_doc_id)
+        if not linked:
+            logger.warning("Could not link doc %s to patient %s (Not found)", resolved_doc_id, patient_id)
 
     return IngestResponse(
         doc_id=result["doc_id"],
@@ -82,6 +92,7 @@ async def delete_ingested_document(doc_id: str) -> DeleteDocumentResponse:
 
     try:
         deleted = weaviate_client.delete_document(resolved_doc_id)
+        unlink_doc_from_patient(resolved_doc_id)
     except Exception as exc:
         logger.error("Delete error for doc_id=%s: %s", resolved_doc_id, exc)
         raise HTTPException(status_code=500, detail="Delete failed. Check server logs.") from exc

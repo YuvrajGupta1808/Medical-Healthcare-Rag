@@ -14,6 +14,8 @@ services:
       WEAVIATE_URL: http://weaviate:8080
       # Local dev Weaviate uses anonymous auth, so force empty key.
       WEAVIATE_API_KEY: ""
+      # Map MinIO dynamically inside Docker network to avoid localhost timeouts
+      MINIO_ENDPOINT: minio:9000
     depends_on:
       weaviate:
         condition: service_healthy
@@ -30,18 +32,18 @@ services:
       retries: 20
     restart: unless-stopped
 
-  streamlit:
-    build:
-      context: .
-      dockerfile: Dockerfile.streamlit
-    ports:
-      - "8501:8501"
-    environment:
-      STREAMLIT_API_BASE_URL: http://backend:8000
-    depends_on:
-      backend:
-        condition: service_healthy
-    restart: unless-stopped
+  #  streamlit:
+  #    build:
+  #      context: .
+  #      dockerfile: Dockerfile.streamlit
+  #    ports:
+  #      - "8501:8501"
+  #    environment:
+  #      STREAMLIT_API_BASE_URL: http://backend:8000
+  #    depends_on:
+  #      backend:
+  #        condition: service_healthy
+  #    restart: unless-stopped
 
   weaviate:
     image: semitechnologies/weaviate:1.27.0
@@ -58,11 +60,44 @@ services:
     volumes:
       - weaviate_data:/var/lib/weaviate
     healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://localhost:8080/v1/.well-known/ready"]
+      test:
+        ["CMD", "wget", "-qO-", "http://localhost:8080/v1/.well-known/ready"]
       interval: 5s
       timeout: 5s
       retries: 10
     restart: unless-stopped
 
+  minio:
+    image: minio/minio:latest
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    volumes:
+      - minio_data:/data
+    command: server /data --console-address ":9001"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  ui:
+    build:
+      context: ./ui
+      dockerfile: Dockerfile
+    ports:
+      - "3000:3000"
+    environment:
+      NEXT_PUBLIC_API_URL: http://backend:8000
+    depends_on:
+      backend:
+        condition: service_healthy
+    restart: unless-stopped
+
 volumes:
   weaviate_data:
+  minio_data:

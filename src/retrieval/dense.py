@@ -34,7 +34,7 @@ async def retrieve_node(state: RAGState) -> dict:
         _query_weaviate_sync,
         embedding,
         state.get("doc_id"),
-        settings.retrieval_top_k,
+        settings.rerank_top_m,
     )
 
     logger.info(

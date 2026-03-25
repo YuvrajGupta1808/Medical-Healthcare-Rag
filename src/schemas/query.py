@@ -15,7 +15,8 @@ class Modality(StrEnum):
 
 class TextQueryRequest(BaseModel):
     query: str = Field(..., min_length=1, max_length=2000, description="Question to ask")
-    doc_id: str | None = Field(None, description="Restrict retrieval to this document ID")
+    doc_id: str | None = Field(None, description="Restrict retrieval to this specific document ID")
+    patient_id: str | None = Field(None, description="Restrict retrieval to all documents for this patient")
     top_k: int = Field(default=5, ge=1, le=20, description="Max chunks to retrieve")
 
 

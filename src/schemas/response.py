@@ -10,12 +10,16 @@ class CitationOut(BaseModel):
     doc_title: str
     page: int | None = None
     section: str | None = None
+    image_url: str | None = None
 
 
 class QueryResponse(BaseModel):
     answer: str
     citations: list[CitationOut]
     image_url: str | None = None
+    pdf_url: str | None = None
+    confidence_score: float | None = None
+    low_confidence: bool | None = None
     query: str
 
 

@@ -16,4 +16,5 @@ RUN pip install --no-cache-dir --upgrade pip && \
 
 EXPOSE 8000
 
-CMD ["uvicorn", "src.api.app:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
+# Dev-friendly: auto-reload Python on file changes (use with bind-mount of /app in compose if desired).
+CMD ["uvicorn", "src.api.app:app", "--host", "0.0.0.0", "--port", "8000", "--reload", "--reload-dir", "/app"]

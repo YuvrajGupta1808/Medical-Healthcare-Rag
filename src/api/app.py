@@ -78,7 +78,11 @@ app.add_middleware(
 from src.api.routes.health import router as health_router  # noqa: E402, I001
 from src.api.routes.ingest import router as ingest_router  # noqa: E402
 from src.api.routes.query import router as query_router  # noqa: E402
+from src.api.routes.system import router as system_router
+from src.api.routes.patients import router as patients_router
 
 app.include_router(health_router, tags=["health"])
 app.include_router(ingest_router, prefix="/ingest", tags=["ingest"])
 app.include_router(query_router, prefix="/query", tags=["query"])
+app.include_router(system_router, prefix="/system", tags=["system"])
+app.include_router(patients_router, prefix="/patients", tags=["patients"])

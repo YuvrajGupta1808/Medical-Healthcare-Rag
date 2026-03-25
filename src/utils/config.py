@@ -50,6 +50,22 @@ class Settings(BaseSettings):
     hybrid_alpha: float = 0.5
     rerank_top_m: int = 20
     rerank_top_k: int = 5
+    confidence_threshold: float = 0.5  # Threshold for raising low_confidence flag
+
+    # ------------------------------------------------------------------
+    # Fireworks AI — Reranking
+    # ------------------------------------------------------------------
+    fireworks_rerank_model: str = "accounts/fireworks/models/qwen3-reranker-8b"
+
+
+    # ------------------------------------------------------------------
+    # MinIO / S3 Storage
+    # ------------------------------------------------------------------
+    minio_endpoint: str = "localhost:9000"
+    minio_access_key: str = "minioadmin"
+    minio_secret_key: str = "minioadmin"
+    minio_bucket: str = "medical-docs"
+    minio_secure: bool = False
 
     # ------------------------------------------------------------------
     # App
